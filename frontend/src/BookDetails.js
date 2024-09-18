@@ -6,6 +6,7 @@ import { Container, Typography, Box, AppBar, Toolbar, Button, TextField, Grid, S
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
+import Cookies from 'js-cookie';
 
 const PREFIX = 'BookDetails';
 
@@ -44,36 +45,48 @@ function BookDetails({ isAuthenticated, handleLogout, handleContactSeller}) {
     const { id } = useParams();
     const [book, setBook] = useState(null);
     const user = JSON.parse(sessionStorage.getItem('user'));
-    const userID = user ? user.ID : null;
-    const [cartItems, setCartItems] = useState([]);
     const [snackbarOpen, setSnackbarOpen] = useState(false);
     const [snackbarMessage, setSnackbarMessage] = useState('');
     const [quantity, setQuantity] = useState(1); // 初始数量设置为 1
+    const userID = user ? user.ID : null;
+
+    const isUserLoggedIn = () => {
+        return !!sessionStorage.getItem('user');
+    };
 
     const handleQuantityChange = (change) => {
         setQuantity(prevQuantity => Math.max(1, prevQuantity + change)); // 确保数量至少为 1
     };
 
 
-    const handleAddToCart = async () => {
-        const existingItem = cartItems.find(item => item.bookID === book.ID);
+    const addToCart = (bookId, quantity) => {
+        if (!isUserLoggedIn()) {
+            setSnackbarMessage('請先登錄');
+            setSnackbarOpen(true);
+            return;
+        }
+        
+        if (userID === book.UserID) {
+            setSnackbarMessage('你不能將自己的書加入購物車');
+            setSnackbarOpen(true);
+            return;
+        }
+
+        const cart = Cookies.get('cart') ? JSON.parse(Cookies.get('cart')) : [];
+        const existingItem = cart.find(item => item.bookId === book.ID);
 
         if (existingItem) {
             setSnackbarMessage('此書籍已在購物車中');
             setSnackbarOpen(true);
             return;
-        }
-
-        try {
-            await axios.post('http://localhost:8080/api/cart/add', { bookID: book.ID, userID: userID, quantity: quantity });
-            setSnackbarMessage('成功加入購物車');
+        } 
+        else {
+            setSnackbarMessage('成功加入購物車中');
             setSnackbarOpen(true);
-
-            const response = await axios.get(`http://localhost:8080/api/cart?userID=${userID}`);
-            setCartItems(response.data);
-        } catch (error) {
-            console.error('Error adding to cart:', error);
+            cart.push({ bookId, quantity });
         }
+
+        Cookies.set('cart', JSON.stringify(cart), { expires: 7, path: '/'}); // 將購物車存入 Cookie，保存 7 天
     };
 
     useEffect(() => {
@@ -163,7 +176,7 @@ function BookDetails({ isAuthenticated, handleLogout, handleContactSeller}) {
                                     InputProps={{ readOnly: true }}
                                 />
                                 <IconButton onClick={() => handleQuantityChange(1)}><AddIcon /></IconButton>
-                                <Button variant="contained" color="primary" sx={{ mr: 1 }} onClick={handleAddToCart}>
+                                <Button variant="contained" color="primary" sx={{ mr: 1 }} onClick={() => addToCart(book.ID, quantity)}>
                                     加入購物車
                                 </Button>
                                 <Snackbar open={snackbarOpen} autoHideDuration={6000} onClose={handleCloseSnackbar}>

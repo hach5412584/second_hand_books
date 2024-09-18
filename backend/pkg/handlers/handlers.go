@@ -3,14 +3,13 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
 	"github.com/cloudinary/cloudinary-go/v2"
 	"github.com/cloudinary/cloudinary-go/v2/api/uploader"
-	"github.com/gorilla/mux"
 	"github.com/hach5412584/second_hand_books/pkg/models"
 	"github.com/hach5412584/second_hand_books/pkg/utils"
 	"golang.org/x/crypto/bcrypt"
@@ -220,117 +219,65 @@ func GetBooks_Details(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(book)
 }
 
-// 添加書籍到購物車
-func AddToCart(w http.ResponseWriter, r *http.Request) {
-	var requestBody struct {
-		BookID   uint `json:"bookID"`
-		UserID   uint `json:"userID"`
-		Quantity int  `json:"quantity"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
-		http.Error(w, "Invalid request Body ", http.StatusBadRequest)
-		return
-	}
-
-	var cartItem models.CartItem
-	if err := db.Where("user_id = ? AND book_id = ?", requestBody.UserID, requestBody.BookID).First(&cartItem).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			// 如果购物车项不存在，则创建新项
-			cartItem = models.CartItem{
-				UserID:   requestBody.UserID,
-				BookID:   requestBody.BookID,
-				Quantity: requestBody.Quantity,
-			}
-			if err := db.Create(&cartItem).Error; err != nil {
-				http.Error(w, "Failed to add item to cart", http.StatusInternalServerError)
-				return
-			}
-		} else {
-			http.Error(w, "Failed to check cart item", http.StatusInternalServerError)
-			return
-		}
-	} else {
-		// 如果购物车项已存在，则更新数量
-		if err := db.Model(&cartItem).Update("quantity", cartItem.Quantity+requestBody.Quantity).Error; err != nil {
-			http.Error(w, "Failed to update item quantity", http.StatusInternalServerError)
-			return
-		}
-	}
-
-	w.WriteHeader(http.StatusCreated)
-}
-
 // 獲取用戶購物車中的書籍
 func GetCartItems(w http.ResponseWriter, r *http.Request) {
-	userID := r.URL.Query().Get("userID")
-	if userID == "" {
-		http.Error(w, "User ID is required", http.StatusUnauthorized)
-		return
-	}
-	var cartItems []models.CartItem
-	if err := db.Preload("Book").Where("user_id = ?", userID).Find(&cartItems).Error; err != nil {
-		http.Error(w, "Failed to fetch cart items", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(cartItems)
-}
-
-func DeleteCartItem(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	itemID, err := strconv.Atoi(vars["itemID"])
+	cartCookie, err := r.Cookie("cart")
 	if err != nil {
-		http.Error(w, "Invalid item ID", http.StatusBadRequest)
+		http.Error(w, "No cart cookie found", http.StatusBadRequest)
 		return
 	}
 
-	userID := r.URL.Query().Get("userID")
-	if userID == "" {
-		http.Error(w, "User ID is required", http.StatusUnauthorized)
-		return
-	}
-
-	// 删除购物车项
-	if err := db.Where("id = ? AND user_id = ?", itemID, userID).Delete(&models.CartItem{}).Error; err != nil {
-		http.Error(w, "Failed to delete item", http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-}
-
-// 更新购物车项数量的处理函数
-func UpdateCartItemQuantity(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	itemID, err := strconv.Atoi(vars["itemID"])
+	decodedValue, err := url.QueryUnescape(cartCookie.Value)
 	if err != nil {
-		http.Error(w, "Invalid item ID", http.StatusBadRequest)
+		http.Error(w, "Failed to decode cookie value", http.StatusBadRequest)
 		return
 	}
 
-	var requestBody struct {
+	var cartItems []struct {
+		BookID   uint `json:"bookId"`
+		Quantity int  `json:"quantity"`
+	}
+
+	if err := json.Unmarshal([]byte(decodedValue), &cartItems); err != nil {
+		http.Error(w, "Invalid cart cookie format", http.StatusBadRequest)
+		return
+	}
+
+	bookIDs := make([]uint, len(cartItems))
+	for i, item := range cartItems {
+		bookIDs[i] = item.BookID
+	}
+
+	// 查詢書籍資料
+	var books []models.Book
+	if err := db.Where("id IN ?", bookIDs).Find(&books).Error; err != nil {
+		http.Error(w, "Failed to fetch cart items from database", http.StatusInternalServerError)
+		return
+	}
+
+	var result []struct {
+		models.Book
 		Quantity int `json:"quantity"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
+	for _, book := range books {
+		for _, cartItem := range cartItems {
+			if book.ID == cartItem.BookID {
+				result = append(result, struct {
+					models.Book
+					Quantity int `json:"quantity"`
+				}{
+					Book:     book,
+					Quantity: cartItem.Quantity, // 將 Cookie 中的數量加到書籍資料中
+				})
+				break
+			}
+		}
 	}
 
-	userID := r.URL.Query().Get("userID")
-	if userID == "" {
-		http.Error(w, "User ID is required", http.StatusUnauthorized)
-		return
-	}
-
-	// 更新购物车项数量
-	if err := db.Model(&models.CartItem{}).Where("id = ? AND user_id = ?", itemID, userID).Update("quantity", requestBody.Quantity).Error; err != nil {
-		http.Error(w, "Failed to update item quantity", http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
+	// 將查詢的結果編碼為 JSON 並返回
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
 }
 
 func GetBooksByCategory(w http.ResponseWriter, r *http.Request) {
@@ -415,4 +362,40 @@ func GetContactsHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(contacts)
+}
+
+func CreateTransaction(w http.ResponseWriter, r *http.Request) {
+	var transaction models.Transaction
+	if err := json.NewDecoder(r.Body).Decode(&transaction); err != nil {
+		http.Error(w, "Invalid input", http.StatusBadRequest)
+		return
+	}
+
+	transaction.Status = "pending"
+	transaction.CreatedAt = time.Now()
+
+	if err := db.Create(&transaction).Error; err != nil {
+		http.Error(w, "Failed to create transaction", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(transaction)
+}
+
+func GetPurchaseHistory(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("userID")
+	if userID == "" {
+		http.Error(w, "User ID is required", http.StatusUnauthorized)
+		return
+	}
+
+	var transactions []models.Transaction
+
+	if err := db.Preload("Book").Where("buyer_id = ?", userID).Find(&transactions).Error; err != nil {
+		http.Error(w, "Failed to fetch purchase history", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(transactions)
 }

@@ -28,7 +28,7 @@ func initDB() {
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
-	if err := db.AutoMigrate(&models.User{}, &models.Book{}, &models.CartItem{}, &models.ChatMessage{}); err != nil {
+	if err := db.AutoMigrate(&models.User{}, &models.Book{}, &models.ChatMessage{}, &models.Transaction{}); err != nil {
 		log.Fatalf("Failed to auto-migrate User model: %v", err)
 	}
 	handlers.SetDB(db)

@@ -23,17 +23,16 @@ func InitRouter() *mux.Router {
 	r.HandleFunc("/api/Quicksearch", handlers.GetBooksByCategory).Methods("GET")
 
 	//cart routes
-	r.HandleFunc("/api/cart/add", handlers.AddToCart).Methods("POST")
 	r.HandleFunc("/api/cart", handlers.GetCartItems).Methods("GET")
-	r.HandleFunc("/api/cart/delete/{itemID:[0-9]+}", handlers.DeleteCartItem).Methods("DELETE")
-	r.HandleFunc("/api/cart/update/{itemID:[0-9]+}", handlers.UpdateCartItemQuantity).Methods("PUT")
 
 	//chat
 	r.HandleFunc("/api/chat/get", handlers.GetChatHistory).Methods("GET")
 	r.HandleFunc("/api/chat/list", handlers.GetContactsHandler).Methods("GET")
 	r.HandleFunc("/api/chat/send", handlers.SendChatMessage).Methods("POST")
 
-	
+	//transactions
+	r.HandleFunc("/api/transactions", handlers.CreateTransaction).Methods("POST")
+	r.HandleFunc("/api/purchaseHistory", handlers.GetPurchaseHistory).Methods("GET")
 
 	return r
 }
