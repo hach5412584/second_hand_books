@@ -9,4 +9,3 @@
 
 目前用 docker 部屬
 
-簡報:https://docs.google.com/presentation/d/10Wv_vrHmUbhDcxLP9TSVZjIJKHpYHCBIdCrOFggpGCo/edit?usp=sharing
